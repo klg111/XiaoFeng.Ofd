@@ -57,6 +57,8 @@ namespace XiaoFeng.Ofd.Internal
         /// <returns>是否读取成功</returns>
         bool ReadOFD()
         {
+            return this.SetError("此 OFDReader 类功能尚未完善，请使用 OFDDocument 类读取文件！   hyb   2026-01-06");
+
             string path = "OFD.xml";
             var file = this.FileZip.GetEntry(path);
             if (file == null)
@@ -121,7 +123,7 @@ namespace XiaoFeng.Ofd.Internal
         DocumentStructure ReadDoc(Location docPath)
         {
             //读取文档 Document.xml
-            var fileDocument = this.FileZip.GetEntry(docPath.ToString());
+            var fileDocument = this.FileZip.GetEntry(docPath.ToString().TrimStart('/'));
             if (fileDocument == null)
             {
                 this.SetError("文档文件读取出错.");

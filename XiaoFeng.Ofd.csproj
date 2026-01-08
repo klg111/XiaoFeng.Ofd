@@ -45,6 +45,6 @@
 	  <Folder Include="Cryptography\" />
 	</ItemGroup>
 	<ItemGroup>
-	  <ProjectReference Include="..\XiaoFeng\XiaoFeng.csproj" />
+	  <PackageReference Include="XiaoFeng" Version="5.3.0" />
 	</ItemGroup>
 </Project>

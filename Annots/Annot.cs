@@ -106,7 +106,10 @@ namespace XiaoFeng.Ofd.Annots
         #endregion
 
         #region 方法
-
+        public override string ToString()
+        {
+            return this.Remark;
+        }
         #endregion
     }
 }

@@ -50,7 +50,7 @@ namespace XiaoFeng.Ofd.PageDescription
         /// </summary>
         /// <param name="index">调色板中颜色的编号,非负整数,将从当前颜色空间的调色板中取出相应索引的预定义颜色用来绘制。索引从0开始</param>
         /// <param name="values">颜色值,指定了当前颜色空间下各通道的取值。</param>
-        public Color(int index,params object[] values)
+        public Color(int index, params object[] values)
         {
             this.Index = index;
             this.Value = values;
@@ -69,7 +69,7 @@ namespace XiaoFeng.Ofd.PageDescription
         /// <param name="r">RED 红</param>
         /// <param name="g">GREEN 绿</param>
         /// <param name="b">BLUE 蓝</param>
-        public Color(int r,int g,int b)
+        public Color(int r, int g, int b)
         {
             this.Value = new STArray(r, g, b);
         }
@@ -939,7 +939,7 @@ namespace XiaoFeng.Ofd.PageDescription
         ///<inheritdoc/>
         public override string ToString()
         {
-            return $"{this.Value}";
+            return this.Value.ToString();
         }
         #endregion
     }

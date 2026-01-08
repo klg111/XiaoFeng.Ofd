@@ -91,7 +91,7 @@ namespace XiaoFeng.Ofd.Fonts
         ///<inheritdoc/>
         public override string ToString()
         {
-            return $"{this.Value}";
+            return this.Value;
         }
         #endregion
     }

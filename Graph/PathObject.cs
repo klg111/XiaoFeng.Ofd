@@ -74,7 +74,7 @@ namespace XiaoFeng.Ofd.Graph
         ///<inheritdoc/>
         public override string ToString()
         {
-            return $"{this.AbbreviatedData}";
+            return this.AbbreviatedData;
         }
         #endregion
     }

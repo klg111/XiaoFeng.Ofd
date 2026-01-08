@@ -1,18 +1,16 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
+using System.Linq;
 using System.Reflection;
-using System.Text;
 using System.Threading.Tasks;
+using XiaoFeng.IO;
 using XiaoFeng.Ofd.BaseType;
 using XiaoFeng.Ofd.BasicStructure;
 using XiaoFeng.Ofd.Enum;
-using System.Linq;
-using System.IO;
-using XiaoFeng.Ofd.CustomTags;
+using XiaoFeng.Ofd.Fonts;
 using XiaoFeng.Xml;
-using System.IO.Compression;
-using XiaoFeng.IO;
-using XiaoFeng.Ofd.Versions;
 
 /****************************************************************
 *  Copyright © (2024) www.eelf.cn All Rights Reserved.          *
@@ -40,6 +38,7 @@ namespace XiaoFeng.Ofd.Internal
             this.OperatorStatus = OperatorStatus.CREATE;
             this.CreateOfdAsync().ConfigureAwait(false);
         }
+
         /// <summary>
         /// 打开 OFD 文件
         /// </summary>
@@ -49,11 +48,12 @@ namespace XiaoFeng.Ofd.Internal
             if (FileHelper.Exists(ofdPath))
             {
                 this.OperatorStatus = OperatorStatus.READ;
-                this.OpenOfdAsync().ConfigureAwait(false);
+                this.OpenOfdAsync().ConfigureAwait(false).GetAwaiter().GetResult();
             }
             else
             {
-                this.CreateOfdAsync().ConfigureAwait(false);
+                this.OperatorStatus = OperatorStatus.CREATE;
+                this.CreateOfdAsync().ConfigureAwait(false).GetAwaiter().GetResult();
             }
         }
         /// <summary>
@@ -63,7 +63,7 @@ namespace XiaoFeng.Ofd.Internal
         public OFDDocument(Stream stream) : base(stream)
         {
             this.OperatorStatus = OperatorStatus.READ;
-            this.OpenOfdAsync().ConfigureAwait(false);
+            this.OpenOfdAsync().ConfigureAwait(false).GetAwaiter().GetResult();
         }
         #endregion
 
@@ -205,6 +205,7 @@ namespace XiaoFeng.Ofd.Internal
             if (!await this.ReadOfdAsync()) return;
             await this.ReadDocumentAsync();
         }
+
         /// <summary>
         /// 读取OFD文件
         /// </summary>
@@ -213,9 +214,9 @@ namespace XiaoFeng.Ofd.Internal
         {
             string path = "OFD.xml";
             var ofdBytes = this.ReadData(path);
-            if(ofdBytes==null) 
+            if (ofdBytes == null)
                 return await this.SetErrorAsync("入口文件读取出错.");
-            if(ofdBytes.Length==0)
+            if (ofdBytes.Length == 0)
                 return await this.SetErrorAsync("入口文件内容为空.");
 
             this.Ofd = ofdBytes.GetString().XmlToEntity<OFD>();
@@ -225,6 +226,7 @@ namespace XiaoFeng.Ofd.Internal
                 return await this.SetErrorAsync("读取文档配置节点出错.");
             return await Task.FromResult(true);
         }
+
         /// <summary>
         /// 读取文档及资源文档
         /// </summary>
@@ -240,6 +242,7 @@ namespace XiaoFeng.Ofd.Internal
             }
             return true;
         }
+
         /// <summary>
         /// 读取文件流
         /// </summary>
@@ -263,6 +266,7 @@ namespace XiaoFeng.Ofd.Internal
             }
             return ms.ToArray();
         }
+
         /// <summary>
         /// 读取文档
         /// </summary>
@@ -271,7 +275,7 @@ namespace XiaoFeng.Ofd.Internal
         async Task<DocumentStructure> ReadDocAsync(Location docPath)
         {
             //读取文档 Document.xml
-            var fileDocument = this.FileZip.GetEntry(docPath.ToString());
+            var fileDocument = this.FileZip.GetEntry(docPath.ToString().TrimStart('/'));
             if (fileDocument == null)
             {
                 await this.SetErrorAsync("文档文件读取出错.");
@@ -292,49 +296,6 @@ namespace XiaoFeng.Ofd.Internal
                 return Structure;
             }
             Structure.Document = DocData;
-
-            //读取文档资源
-            var fileDocRes = this.FileZip.GetEntry(path + DocData.CommonData.FirstOrDefault().DocumentRes.ToString());
-            if (fileDocRes == null)
-            {
-                await this.SetErrorAsync("文档资源文件读取出错.");
-                return Structure;
-            }
-            var docResStream = fileDocRes.Open();
-            bytes = new byte[docResStream.Length];
-            await docResStream.ReadAsync(bytes, 0, bytes.Length);
-            docResStream.Close();
-            docResStream.Dispose();
-            content = bytes.GetString();
-            var DocResData = content.XmlToEntity<DocumentRes>();
-            if (DocResData == null)
-            {
-                await this.SetErrorAsync("读取文档资源文件出错.");
-                return Structure;
-            }
-            Structure.DocumentRes = DocResData;
-            DocResData.SetMultiMediaData(path, this.FileZip);
-
-            //读取公共文档资源
-            var filePubRes = this.FileZip.GetEntry(path + DocData.CommonData.FirstOrDefault().PublicRes.ToString());
-            if (filePubRes == null)
-            {
-                await this.SetErrorAsync("文档公共资源文件读取出错.");
-                return Structure;
-            }
-            var PubResStream = filePubRes.Open();
-            bytes = new byte[PubResStream.Length];
-            await PubResStream.ReadAsync(bytes, 0, bytes.Length);
-            PubResStream.Close();
-            PubResStream.Dispose();
-            content = bytes.GetString();
-            var PublicResData = content.XmlToEntity<PublicRes>();
-            if (PublicResData == null)
-            {
-                await this.SetErrorAsync("读取公共文档资源文件出错.");
-                return Structure;
-            }
-            Structure.PublicRes = PublicResData;
 
             //读取页面
             foreach (var p in DocData.Pages)
@@ -360,127 +321,186 @@ namespace XiaoFeng.Ofd.Internal
                 Structure.Pages.Add(pageData);
             }
 
-            //读取模板
             if (DocData.CommonData != null && DocData.CommonData.Count > 0)
             {
-                var templatePages = DocData.CommonData.FirstOrDefault().TemplatePage;
-                if (templatePages != null && templatePages.Count > 0)
+                foreach (var commonData in DocData.CommonData)
                 {
-                    foreach (var p in templatePages)
+                    //读取文档资源
+                    if (!string.IsNullOrWhiteSpace(commonData.DocumentRes?.ToString()))
                     {
-                        var page = this.FileZip.GetEntry(path + p.BaseLoc);
-                        if (page == null)
+                        var fileDocRes = this.FileZip.GetEntry(path + commonData.DocumentRes.ToString());
+                        if (fileDocRes == null)
                         {
-                            await this.SetErrorAsync("读取模板页面文件出错.");
+                            await this.SetErrorAsync("文档资源文件读取出错.");
                             return Structure;
                         }
-                        var pageStream = page.Open();
-                        bytes = new byte[pageStream.Length];
-                        await pageStream.ReadAsync(bytes, 0, bytes.Length);
-                        pageStream.Close();
+                        var docResStream = fileDocRes.Open();
+                        bytes = new byte[docResStream.Length];
+                        await docResStream.ReadAsync(bytes, 0, bytes.Length);
+                        docResStream.Close();
+                        docResStream.Dispose();
                         content = bytes.GetString();
-                        var pageData = content.XmlToEntity<Page>();
-                        if (pageData == null)
+                        var DocResData = content.XmlToEntity<DocumentRes>();
+                        if (DocResData == null)
                         {
-                            await this.SetErrorAsync("读取模板页面文件出错.");
+                            await this.SetErrorAsync("读取文档资源文件出错.");
                             return Structure;
                         }
-                        Structure.TemplatePages.Add(pageData);
+                        Structure.DocumentRes = DocResData;
+                        DocResData.SetMultiMediaData(path, this.FileZip);
+                    }
+
+                    //读取公共文档资源
+                    if (!string.IsNullOrWhiteSpace(commonData.PublicRes?.ToString()))
+                    {
+                        var filePubRes = this.FileZip.GetEntry(path + commonData.PublicRes.ToString());
+                        if (filePubRes == null)
+                        {
+                            await this.SetErrorAsync("文档公共资源文件读取出错.");
+                            return Structure;
+                        }
+                        var PubResStream = filePubRes.Open();
+                        bytes = new byte[PubResStream.Length];
+                        await PubResStream.ReadAsync(bytes, 0, bytes.Length);
+                        PubResStream.Close();
+                        PubResStream.Dispose();
+                        content = bytes.GetString();
+                        var PublicResData = content.XmlToEntity<PublicRes>();
+                        if (PublicResData == null)
+                        {
+                            await this.SetErrorAsync("读取公共文档资源文件出错.");
+                            return Structure;
+                        }
+                        Structure.PublicRes = PublicResData;
+                    }
+
+                    //读取模板
+                    var templatePages = commonData.TemplatePage;
+                    if (templatePages != null && templatePages.Count > 0)
+                    {
+                        foreach (var p in templatePages)
+                        {
+                            var page = this.FileZip.GetEntry(path + p.BaseLoc);
+                            if (page == null)
+                            {
+                                await this.SetErrorAsync("读取模板页面文件出错.");
+                                return Structure;
+                            }
+                            var pageStream = page.Open();
+                            bytes = new byte[pageStream.Length];
+                            await pageStream.ReadAsync(bytes, 0, bytes.Length);
+                            pageStream.Close();
+                            content = bytes.GetString();
+                            var pageData = content.XmlToEntity<Page>();
+                            if (pageData == null)
+                            {
+                                await this.SetErrorAsync("读取模板页面文件出错.");
+                                return Structure;
+                            }
+                            Structure.TemplatePages.Add(pageData);
+                        }
                     }
                 }
             }
-            //读取 tags
-            var fileTags = this.FileZip.GetEntry(path + DocData.CustomTags);
-            if (fileTags == null)
-            {
-                await this.SetErrorAsync("文档自定义标签文件读取出错.");
-                return Structure;
-            }
-            var TagsStream = fileTags.Open();
-            bytes = new byte[TagsStream.Length];
-            await TagsStream.ReadAsync(bytes, 0, bytes.Length);
-            TagsStream.Close();
-            TagsStream.Dispose();
 
-            content = bytes.GetString();
-            var TagsData = content.XmlToEntity<CustomTags.CustomTags>();
-            if (TagsData == null)
+            //读取 tags
+            if (!string.IsNullOrWhiteSpace(DocData.CustomTags?.ToString()))
             {
-                await this.SetErrorAsync("读取自定义标签文件出错.");
-                return Structure;
-            }
-            Structure.CustomTags = TagsData;
-            //读取自定义标引内容
-            var subpath = fileTags.FullName.Substring(0, fileTags.FullName.LastIndexOf("/") + 1);
-            foreach (var t in TagsData.Tags)
-            {
-                var fileTag = this.FileZip.GetEntry(subpath + t.FileLoc);
-                if (fileTag == null)
+                var fileTags = this.FileZip.GetEntry(path + DocData.CustomTags);
+                if (fileTags == null)
                 {
                     await this.SetErrorAsync("文档自定义标签文件读取出错.");
-                    return null;
+                    return Structure;
                 }
-                var TagStream = fileTag.Open();
-                bytes = new byte[TagStream.Length];
-                await TagStream.ReadAsync(bytes, 0, bytes.Length);
-                TagStream.Close();
-                TagStream.Dispose();
+                var TagsStream = fileTags.Open();
+                bytes = new byte[TagsStream.Length];
+                await TagsStream.ReadAsync(bytes, 0, bytes.Length);
+                TagsStream.Close();
+                TagsStream.Dispose();
 
                 content = bytes.GetString();
-                var TagData = content.XmlToEntity();
-                if (TagData == null)
+                var TagsData = content.XmlToEntity<CustomTags.CustomTags>();
+                if (TagsData == null)
                 {
                     await this.SetErrorAsync("读取自定义标签文件出错.");
-                    return null;
+                    return Structure;
                 }
-                Structure.CustomTagList.Add((XmlValue)TagData);
+                Structure.CustomTags = TagsData;
+                //读取自定义标引内容
+                var subpath = fileTags.FullName.Substring(0, fileTags.FullName.LastIndexOf("/") + 1);
+                foreach (var t in TagsData.Tags)
+                {
+                    var fileTag = this.FileZip.GetEntry(subpath + t.FileLoc);
+                    if (fileTag == null)
+                    {
+                        await this.SetErrorAsync("文档自定义标签文件读取出错.");
+                        return null;
+                    }
+                    var TagStream = fileTag.Open();
+                    bytes = new byte[TagStream.Length];
+                    await TagStream.ReadAsync(bytes, 0, bytes.Length);
+                    TagStream.Close();
+                    TagStream.Dispose();
+
+                    content = bytes.GetString();
+                    var TagData = content.XmlToEntity();
+                    if (TagData == null)
+                    {
+                        await this.SetErrorAsync("读取自定义标签文件出错.");
+                        return null;
+                    }
+                    Structure.CustomTagList.Add((XmlValue)TagData);
+                }
             }
 
             //读取 Annots
-            var fileAnnotations = this.FileZip.GetEntry(path + DocData.Annotations);
-            if (fileAnnotations == null)
+            if (!string.IsNullOrWhiteSpace(DocData.Annotations?.ToString()))
             {
-                await this.SetErrorAsync("文档自定义标签文件读取出错.");
-                return Structure;
-            }
-            var AnnotationsStream = fileAnnotations.Open();
-            bytes = new byte[AnnotationsStream.Length];
-            await AnnotationsStream.ReadAsync(bytes, 0, bytes.Length);
-            AnnotationsStream.Close();
-            AnnotationsStream.Dispose();
-
-            content = bytes.GetString();
-            var AnnotationsData = content.XmlToEntity<Annots.Annotations>();
-            if (AnnotationsData == null)
-            {
-                await this.SetErrorAsync("读取自定义标签文件出错.");
-                return Structure;
-            }
-            Structure.Annotations = AnnotationsData;
-            //读取分布注释
-            subpath = fileAnnotations.FullName.Substring(0, fileAnnotations.FullName.LastIndexOf("/") + 1);
-            foreach (var a in AnnotationsData.Pages)
-            {
-                var fileAnnot = this.FileZip.GetEntry(subpath + a.FileLoc);
-                if (fileAnnot == null)
+                var fileAnnotations = this.FileZip.GetEntry(path + DocData.Annotations);
+                if (fileAnnotations == null)
                 {
-                    await this.SetErrorAsync("文档分页注释文件读取出错.");
+                    await this.SetErrorAsync("文档注释文件读取出错.");
                     return Structure;
                 }
-                var AnnotStream = fileAnnot.Open();
-                bytes = new byte[AnnotStream.Length];
-                await AnnotStream.ReadAsync(bytes, 0, bytes.Length);
-                AnnotStream.Close();
-                AnnotStream.Dispose();
+                var AnnotationsStream = fileAnnotations.Open();
+                bytes = new byte[AnnotationsStream.Length];
+                await AnnotationsStream.ReadAsync(bytes, 0, bytes.Length);
+                AnnotationsStream.Close();
+                AnnotationsStream.Dispose();
 
                 content = bytes.GetString();
-                var AnnotData = content.XmlToEntity<Annots.PageAnnot>();
-                if (AnnotData == null)
+                var AnnotationsData = content.XmlToEntity<Annots.Annotations>();
+                if (AnnotationsData == null)
                 {
-                    await this.SetErrorAsync("读取分页注释文件出错.");
+                    await this.SetErrorAsync("读取注释文件出错.");
                     return Structure;
                 }
-                Structure.PageAnnots.Add(AnnotData);
+                Structure.Annotations = AnnotationsData;
+                //读取分布注释
+                var subpath = fileAnnotations.FullName.Substring(0, fileAnnotations.FullName.LastIndexOf("/") + 1);
+                foreach (var a in AnnotationsData.Pages)
+                {
+                    var fileAnnot = this.FileZip.GetEntry(subpath + a.FileLoc);
+                    if (fileAnnot == null)
+                    {
+                        await this.SetErrorAsync("文档分页注释文件读取出错.");
+                        return Structure;
+                    }
+                    var AnnotStream = fileAnnot.Open();
+                    bytes = new byte[AnnotStream.Length];
+                    await AnnotStream.ReadAsync(bytes, 0, bytes.Length);
+                    AnnotStream.Close();
+                    AnnotStream.Dispose();
+
+                    content = bytes.GetString();
+                    var AnnotData = content.XmlToEntity<Annots.PageAnnot>();
+                    if (AnnotData == null)
+                    {
+                        await this.SetErrorAsync("读取分页注释文件出错.");
+                        return Structure;
+                    }
+                    Structure.PageAnnots.Add(AnnotData);
+                }
             }
             return Structure;
         }
@@ -639,9 +659,22 @@ namespace XiaoFeng.Ofd.Internal
         /// </summary>
         public List<Page> Pages
         {
-            get { return this.Documents.First().Pages; }
+            get { return this.Documents.SelectMany(documentStructure => documentStructure.Pages).ToList(); }
         }
         #endregion
+
+        /// <summary>
+        /// 查找文档中的页面（含模板）和注释中是否包含指定的 字符串
+        /// </summary>
+        /// <param name="text"></param>
+        /// <returns></returns>
+        public bool ContainsText(string text)
+        {
+            return this.Documents?.Any(documentStructure =>
+                                 (documentStructure.Pages?.Any(page => page.Content.Any(layer => layer.PageBlock.Any(iPageBlock => iPageBlock is TextObject textObject && textObject.TextCode.Any(textCode => textCode.Value.Contains(text))))) ?? false)
+                                 || (documentStructure.TemplatePages?.Any(page => page.Content.Any(layer => layer.PageBlock.Any(iPageBlock => iPageBlock is TextObject textObject && textObject.TextCode.Any(textCode => textCode.Value.Contains(text))))) ?? false)
+                                 || (documentStructure.PageAnnots?.Any(pageAnnot => pageAnnot.Annots.Any(annot => annot.Remark.Contains(text))) ?? false)) ?? false;
+        }
 
         #endregion
     }
